@@ -1,31 +1,33 @@
 import os
 import requests
 import logging
+import re
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 
-ULTRAMSG_INSTANCE_ID = os.environ.get('ULTRAMSG_INSTANCE_ID')
-ULTRAMSG_TOKEN = os.environ.get('ULTRAMSG_TOKEN')
-
 @app.route('/send-invoice', methods=['POST'])
 def send_invoice():
     try:
+        # قراءة وتنظيف متناغم لمتغيرات البيئة لحذف أي مسافات مخفية
+        ULTRAMSG_INSTANCE_ID = (os.environ.get('ULTRAMSG_INSTANCE_ID') or '').strip()
+        ULTRAMSG_TOKEN = (os.environ.get('ULTRAMSG_TOKEN') or '').strip()
+
         data = request.json or {}
         logging.info(f"Received payload from Odoo: {data}")
         
-        # استخراج رقم الهاتف المباشر من الحقل الجديد x_studio_phone أو أي حقل هاتف محتمل
-        phone = (
+        # استخراج رقم الهاتف المباشر
+        phone_raw = (
             data.get('x_studio_phone') or 
             data.get('mobile') or 
-            data.get('phone') 
+            data.get('phone') or 
+            data.get('x_studio_customer_phone')
         )
         
-        # إذا قُدم رقم هاتف محدد داخل partner_id كقاموس
-        if not phone and isinstance(data.get('partner_id'), dict):
-            phone = data['partner_id'].get('mobile') or data['partner_id'].get('phone')
+        if not phone_raw and isinstance(data.get('partner_id'), dict):
+            phone_raw = data['partner_id'].get('mobile') or data['partner_id'].get('phone')
 
         # استخراج حالة الإنتاج/الطلب
         status = (
@@ -36,7 +38,7 @@ def send_invoice():
         
         order_name = data.get('name', 'الطلب')
 
-        # تخصيص نص الرسالة بناءً على الحالة
+        # نص الرسالة حسب الحالة
         if status == 'في التحضير':
             message = f"مرحباً، طلبك رقم {order_name} أصبح الآن قيد التحضير!"
         elif status == 'جاهز للتوصيل':
@@ -46,7 +48,7 @@ def send_invoice():
         else:
             message = f"مرحباً، تم تحديث حالة طلبك رقم {order_name} إلى: {status}"
 
-        if not phone:
+        if not phone_raw:
             logging.error("No phone number found in payload.")
             return jsonify({
                 "status": "error", 
@@ -54,9 +56,10 @@ def send_invoice():
                 "received_data": data
             }), 400
 
-        # تنظيف رقم الهاتف وإرساله لـ UltraMsg
-        clean_phone = str(phone).strip().replace(" ", "").replace("-", "").replace("+", "")
+        # تنظيف رقم الهاتف بانتظام لإبقاء الأرقام فقط بدون + أو مسافات
+        clean_phone = re.sub(r'\D', '', str(phone_raw))
 
+        # إرسال الطلب لـ UltraMsg
         url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
         payload = {
             "token": ULTRAMSG_TOKEN,
@@ -65,9 +68,15 @@ def send_invoice():
         }
         headers = {'content-type': 'application/x-www-form-urlencoded'}
         
-        response = requests.post(url, data=payload, headers=headers)
-        res_data = response.json() if response.headers.get('content-type') == 'application/json' else response.text
+        logging.info(f"Sending to UltraMsg URL: {url} with phone: {clean_phone}")
         
+        response = requests.post(url, data=payload, headers=headers)
+        
+        try:
+            res_data = response.json()
+        except Exception:
+            res_data = response.text
+
         logging.info(f"UltraMsg Response: {res_data}")
         return jsonify({"status": "success", "ultramsg_response": res_data}), response.status_code
 
