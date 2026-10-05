@@ -40,9 +40,9 @@ def send_invoice():
 
         # نص الرسالة حسب الحالة
         if status == 'في التحضير':
-            message = f"مرحباً، طلبك رقم {order_name} أصبح الآن قيد التحضير!"
+            message = f"مرحباً، طلبك رقم {order_name} قيد التحضير!"
         elif status == 'جاهز للتوصيل':
-            message = f"مرحباً، طلبك رقم {order_name} جاهز للتوصيل الآن!"
+            message = f"مرحباً، طلبك رقم {order_name} جاهز للتوصيل أو الاستلام من المعرض الآن!"
         elif status == 'تم تسليمه للتوصيل':
             message = f"مرحباً، طلبك رقم {order_name} أصبح الآن مع شركة التوصيل!"
         else:
